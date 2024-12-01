@@ -1,4 +1,4 @@
-from cryptography.hazmat.primitives.asymmetric import ec, padding
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.exceptions import InvalidSignature
 
@@ -66,10 +66,6 @@ class HSM:
 if __name__ == '__main__':
     hsm = HSM()
     public_key = hsm.generate_keypair('RootCA')
-    public_pem = public_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    )
     signature = hsm.sign('PolicyCA', b'HelloWorld')
     if signature:
         print('The signature of \"Hello World\" is {}'.format(signature.hex()))
