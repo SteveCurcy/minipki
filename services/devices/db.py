@@ -9,8 +9,8 @@ class DB:
     def update(self, user: str, certificate: x509.Certificate) -> None:
         self.certificates.update({user: certificate})
     
-    def delete(self, user: str) -> None:
-        self.certificates.pop(user, None)
+    def delete(self, user: str) -> x509.Certificate:
+        return self.certificates.pop(user, None)
     
     def retrive(self, user: str) -> x509.Certificate:
         if user not in self.certificates:

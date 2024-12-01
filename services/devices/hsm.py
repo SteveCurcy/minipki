@@ -20,13 +20,7 @@ class HSM:
         public_key = private_key.public_key()
         # save the private key into the dictionary
         self.private_keys.update({user: private_key})
-        
-        public_pem = public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
-        print('[simulator] Info: A key pair generated for {}:\n\n{}'.format(user, public_pem.decode()))
-        
+
         return public_key
 
     '''
