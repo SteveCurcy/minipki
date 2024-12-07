@@ -1,4 +1,5 @@
 from pyroute2 import IPRoute, netns
+import os
 
 if __name__ == '__main__':
     # create two namespaces for root and sub CA.
@@ -32,8 +33,21 @@ if __name__ == '__main__':
     ipr.link('set', index=veth_rt['index'], net_ns_fd='Root CA')
     ipr.link('set', index=veth_sub['index'], net_ns_fd='Sub CA')
     
+    # Save the current netns in order to return to it later. If newns
+    # is specified, change to it.
+    netns.pushns('Root CA')
+    
+    # test if the process move into the Root CA namespace
+    for info in ipr.get_netns_info():
+        print(info)
+    print(netns.pid_to_ns(os.getpid()))
+    
+    # Restore the previously saved netns. No use, just for learning.
+    netns.popns()
+    
     # BTW, don't forget realse the resource of IPRoute.
     ipr.close()
+    del ipr
     
     # So, you may find that, it's no need to delete the veth interfaces.
     # But, if you didn't put any veth into a namespace, you'd better use
