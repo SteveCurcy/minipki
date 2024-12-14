@@ -10,7 +10,17 @@ def public_key_str(public_key: ec.EllipticCurvePublicKey) -> str:
     ).decode()
 
 def certificate_str(certificate: x509.Certificate) -> str:
-    return certificate.public_bytes(serialization.Encoding.PEM).decode()
+    return f'''
+Subject: {str(certificate.subject)[6:-2]}
+Issuer: {str(certificate.issuer)[6:-2]}
+Invalid Before: {certificate.not_valid_before_utc}
+Invalid After: {certificate.not_valid_after_utc}
+Public Key:
+{certificate.public_key().public_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PublicFormat.SubjectPublicKeyInfo
+).decode()}Signature Algorithm: SHA256_with_ECDSA_PSS
+'''
 
 def get_CN_from_subject(subject: x509.Name) -> str:
     return subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
