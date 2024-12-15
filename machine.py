@@ -5,7 +5,6 @@ from cryptography.hazmat.primitives.asymmetric import ec, padding
 from pyroute2 import IPRoute, netns, NetNS
 from multiprocessing import Process, Queue
 import socket
-import uuid
 import os
 
 from cryptography.x509.oid import NameOID
@@ -16,7 +15,7 @@ import utils
 
 '''
 @class Machine: This is the super class for all endpoints meant to communicate.
-@desc: There is a unique uuid derived by timestamp for every device. For
+@desc: There is a unique hostname for every device. For
   security communication, everyone should have a certificate to prove itself.
   And they use a chain of certs to verify others' certifcates.
   They may have the following behaviors:
@@ -28,7 +27,6 @@ import utils
 '''
 class Machine(ABC):
   def __init__(self, hostname: str) -> None:
-    self.__uuid = str(uuid.uuid1())
     self.__hostname = hostname
     self.__private_key = None
     self.__certificate = None
@@ -42,28 +40,28 @@ class Machine(ABC):
     machines.
   '''
   def poweron(self, bridgename: str) -> None:
-    if not os.path.exists(f'/var/run/netns/{self.__uuid}'):
-      netns.create(self.__uuid)    # create a namespace for this machine.
-    self.__ns = NetNS(self.__uuid)
+    if not os.path.exists(f'/var/run/netns/{self.hostname}'):
+      netns.create(self.hostname)    # create a namespace for this machine.
+    self.__ns = NetNS(self.hostname)
     
     # create a link to bridge. Note that use the default netns, or it's hard
     # to move the veth into the default ns.
     ipr = IPRoute()
-    ipr.link('add', ifname='trust-plat-veth', peer='trust-br-veth', kind='veth')
+    ipr.link('add', ifname=f'{self.hostname}-veth', peer=f'{self.hostname}-{bridgename}-veth', kind='veth')
     # get and save the index of veth
-    self.__veth_idx = ipr.link_lookup(ifname='trust-plat-veth')[0]
-    br_veth_idx = ipr.link_lookup(ifname='trust-br-veth')[0]
+    self.__veth_idx = ipr.link_lookup(ifname=f'{self.hostname}-veth')[0]
+    br_veth_idx = ipr.link_lookup(ifname=f'{self.hostname}-{bridgename}-veth')[0]
     br_idx = ipr.link_lookup(ifname=bridgename)[0]
     # set the state and ns for veth, and attach it into bridge.
     ipr.link('set', index=br_veth_idx, master=br_idx, state='up')
-    ipr.link('set', index=self.__veth_idx, state='up', net_ns_fd=self.uuid)
+    ipr.link('set', index=self.__veth_idx, state='up', net_ns_fd=self.hostname)
   
   def poweroff(self) -> None:
     self.__address = None
     self.__veth_idx = None
     # self.__ns.addr('delete', index=self.__veth_idx)
     self.__ns.close()
-    netns.remove(self.__uuid)
+    netns.remove(self.hostname)
   
   '''
   @param type: what do you wanna flush into the machine, which MUST be one of:
@@ -91,7 +89,7 @@ class Machine(ABC):
       self.__certificate = cert
       self.__cert_chain = chain
     else:
-      print(f'\033[31m[simulator] Error: Unknown Type \'{uuid}\' or wrong parameters.\033[0m')
+      print(f'\033[31m[simulator] Error: Unknown Type \'{type}\' or wrong parameters.\033[0m')
       return False
     return True
   
@@ -125,10 +123,6 @@ class Machine(ABC):
   @abstractmethod
   def cli(self) -> None:
     pass
-  
-  @property
-  def uuid(self) -> str:
-    return self.__uuid
   
   @property
   def certificate(self) -> x509.Certificate:
@@ -196,7 +190,7 @@ class Server(Machine):
   # This is the service function, which is a simple demo.
   # If you wanna provide a complicate service, override this method.
   def service(self) -> None:
-    netns.setns(self.uuid)
+    netns.setns(self.hostname)
 
     # Create a TCP/IP socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -235,6 +229,37 @@ class Server(Machine):
       if command[0] == 'exit':
         break
 
+
+class Client(Machine):
+  def __init__(self, hostname):
+    super().__init__(hostname)
+  
+  def connect(self, addr: str, port: int) -> bool:
+    netns.pushns(self.hostname)
+
+    # Create a standard TCP socket
+    c_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    result = c_socket.connect_ex((addr, port))
+    if result == 0:
+      print(f"[MiniPKI] {self.hostname}: connected to {addr}:{port}.")
+    else:
+      print(f"[MiniPKI] Error: failed to connect to {addr}:{port}.")
+      return None
+
+    # Send a message
+    c_socket.send(b"Hello, Server!")
+    print(f"[MiniPKI] {self.hostname}: Message sent!")
+
+    # Receive a response
+    response = c_socket.recv(1024)
+    print(f"[MiniPKI] {self.hostname}: Received \"{response.decode()}\".")
+    c_socket.close()
+
+    netns.popns()
+  
+  def cli(self) -> None:
+    pass
 
 def test_connect(addr: str, port: int) -> None:
   ipr = IPRoute()
@@ -276,14 +301,16 @@ if __name__ == '__main__':
   ipr.link('add', ifname="br", kind="bridge")
   ipr.link('set', index=ipr.link_lookup(ifname='br')[0], state='up')
   server = Server('server')
+  client = Client('Client')
   server.poweron('br')
+  client.poweron('br')
   server.address = '192.168.0.2'
+  client.address = '192.168.0.1'
   server.start()
   import time
   time.sleep(1)
-
-  test_connect(server.address, server.service_port)
-
+  client.connect(server.address, server.service_port)
   server.stop()
   server.poweroff()
+  client.poweroff()
   ipr.link('del', ifname='br')

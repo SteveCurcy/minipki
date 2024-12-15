@@ -1,5 +1,5 @@
 # MiniPKI
-[![](https://img.shields.io/badge/Author-Xu.Cao-lightgreen)](https://github.com/SteveCurcy) ![](https://img.shields.io/badge/Version-0.0.1-yellow)
+[![](https://img.shields.io/badge/Author-Xu.Cao-lightgreen)](https://github.com/SteveCurcy) ![](https://img.shields.io/badge/Version-0.2.2-yellow)
 
 🎯 本项目的目标是实现一个小型的 PKI 系统模拟器。主要使用的技术是 Linux 系统提供的 Network Namespace 隔离机制。
 
