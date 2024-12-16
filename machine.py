@@ -33,6 +33,18 @@ class Machine(ABC):
     self.__cert_chain = dict()  # CA's name to CA's cert
     self.__address = None
     self.__veth_idx = None
+    self.__cmd_map = {
+      'help': self.help,
+    }
+    self.__help_text = ''
+  
+  def help(self) -> None:
+    print(f'''
+Usage: COMMAND [OPTION] [ARGS]
+exit              Exit the Command Line
+help              Show This message
+{self.__help_text}
+''')
   
   '''
   @param bridgename: which bridge wanna connect to.
@@ -120,9 +132,22 @@ class Machine(ABC):
   @desc: provide a command line for user to execute some operations.
     Different kind Endpoint may provide different functions.
   '''
-  @abstractmethod
   def cli(self) -> None:
-    pass
+    while True:
+      cmd = input(f'[{self.hostname}]$ ')
+      if cmd == '':
+        continue
+      if cmd == 'exit':
+        break
+      cmd = cmd.split()
+      args = cmd[1:]
+      cmd = cmd[0]
+      if cmd in self.__cmd_map:
+        tar_func = self.__cmd_map.get(cmd)
+        tar_func(*args)
+      else:
+        self.help()
+      
   
   @property
   def certificate(self) -> x509.Certificate:
@@ -139,6 +164,17 @@ class Machine(ABC):
   @property
   def address(self) -> str:
     return self.__address
+
+  @property
+  def help_text(self) -> str:
+    return self.__help_text
+  
+  @help_text.setter
+  def help_text(self, text: str) -> None:
+    self.__help_text = text
+  
+  def set_cmd_map(self, cmd_map: dict) -> None:
+    self.__cmd_map.update(cmd_map)
   
   '''
   @param addr: the address wanna set to this machine.
@@ -187,8 +223,10 @@ class Server(Machine):
   def service_port(self, port: int) -> None:
     self.__service_port = port
   
-  # This is the service function, which is a simple demo.
-  # If you wanna provide a complicate service, override this method.
+  '''
+  @desc: This is the service method, will listen on a specific port
+    and call the method `work` to cope the requests.
+  '''
   def service(self) -> None:
     netns.setns(self.hostname)
 
@@ -203,15 +241,22 @@ class Server(Machine):
     while True:
       # Accept a new connection
       client_socket, client_address = server_socket.accept()
-      print(f"[MiniPKI] {self.hostname}: connected by {client_address}.")
-
-      # Receive a message
-      data = client_socket.recv(1024)
-      print(f"[MiniPKI] {self.hostname}: Received \"{data.decode()}\".")
-
-      # Send a response
-      client_socket.send(b"Hello, Client!")
+      self.work(client_socket, client_address)
       client_socket.close()
+
+  '''
+  @param client_socket: which client's request will be handled.
+  @param client_address: the address connected to this server.
+  @desc: This is the real logic method to cope with the client requests.
+    So, if you wanna design the custom logic, override this method.
+  '''
+  def work(self, c_socket: socket, c_address: tuple) -> None:
+    print(f"[MiniPKI] {self.hostname}: connected by {c_address}.")
+    # Receive a message
+    data = c_socket.recv(1024)
+    print(f"[MiniPKI] {self.hostname}: Received \"{data.decode()}\".")
+    # Send a response
+    c_socket.send(b"Hello, Client!")
   
   def start(self) -> None:
     self.__service_process = Process(target=self.service, args=())
@@ -239,61 +284,26 @@ class Client(Machine):
 
     # Create a standard TCP socket
     c_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
     result = c_socket.connect_ex((addr, port))
     if result == 0:
       print(f"[MiniPKI] {self.hostname}: connected to {addr}:{port}.")
     else:
       print(f"[MiniPKI] Error: failed to connect to {addr}:{port}.")
-      return None
+      netns.popns()
+      return False
 
+    self.work(c_socket)
+    
+    c_socket.close()
+    netns.popns()
+  
+  def work(self, c_socket: socket) -> None:
     # Send a message
     c_socket.send(b"Hello, Server!")
     print(f"[MiniPKI] {self.hostname}: Message sent!")
-
     # Receive a response
     response = c_socket.recv(1024)
     print(f"[MiniPKI] {self.hostname}: Received \"{response.decode()}\".")
-    c_socket.close()
-
-    netns.popns()
-  
-  def cli(self) -> None:
-    pass
-
-def test_connect(addr: str, port: int) -> None:
-  ipr = IPRoute()
-  ipr.link('add', ifname='test-veth', peer='test-br-veth', kind='veth')
-  # get and save the index of veth
-  veth_idx = ipr.link_lookup(ifname='test-veth')[0]
-  br_veth_idx = ipr.link_lookup(ifname='test-br-veth')[0]
-  br_idx = ipr.link_lookup(ifname='br')[0]
-  # set the state and ns for veth, and attach it into bridge.
-  ipr.link('set', index=br_veth_idx, master=br_idx, state='up')
-  ipr.link('set', index=veth_idx, state='up')
-  ipr.addr('add', index=veth_idx, address='192.168.0.1', mask=24)
-
-  # Create a standard TCP socket
-  c_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-  result = c_socket.connect_ex((addr, port))
-  if result == 0:
-    print(f"[MiniPKI] Client: connected to {addr}:{port}.")
-  else:
-    print(f"[MiniPKI] Error: failed to connect to {addr}:{port}.")
-    return None
-
-  # Send a message
-  c_socket.send(b"Hello, Server!")
-  print("[MiniPKI] Client: Message sent!")
-
-  # Receive a response
-  response = c_socket.recv(1024)
-  print(f"[MiniPKI] Client: Received \"{response.decode()}\".")
-  c_socket.close()
-
-  ipr.link('del', ifname='test-veth')
-  ipr.close()
     
 
 if __name__ == '__main__':
@@ -312,5 +322,6 @@ if __name__ == '__main__':
   client.connect(server.address, server.service_port)
   server.stop()
   server.poweroff()
+  client.cli()
   client.poweroff()
   ipr.link('del', ifname='br')
