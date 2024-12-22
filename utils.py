@@ -22,5 +22,44 @@ Public Key:
 ).decode()}Signature Algorithm: SHA256_with_ECDSA_PSS
 '''
 
+def serialize_cert(certificate: x509.Certificate) -> bytes:
+  return certificate.public_bytes(
+    encoding=serialization.Encoding.DER
+  )
+
+def serialize_key(key: ec.EllipticCurvePrivateKey) -> bytes:
+  return key.private_bytes(
+    encoding=serialization.Encoding.DER,
+    format=serialization.PrivateFormat.PKCS8,
+    encryption_algorithm=serialization.NoEncryption()
+  )
+
+def serialize_csr(csr: x509.CertificateSigningRequest) -> bytes:
+  return csr.public_bytes(
+    encoding=serialization.Encoding.DER
+  )
+
+def serialize_chain(chain: dict) -> dict:
+  for key in chain:
+    chain[key] = serialize_cert(chain[key])
+  return chain
+
+def load_chain(chain: dict) -> dict:
+  for key in chain:
+    chain[key] = load_cert(chain[key])
+  return chain
+
+def load_csr(csr: bytes) -> x509.CertificateSigningRequest:
+  return x509.load_der_x509_csr(csr)
+
+def load_key(key: bytes) -> ec.EllipticCurvePrivateKey:
+  return serialization.load_der_private_key(
+    key,
+    password=None
+  )
+
+def load_cert(cert: bytes) -> x509.Certificate:
+  return x509.load_der_x509_certificate(cert)
+
 def get_CN_from_subject(subject: x509.Name) -> str:
   return subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
