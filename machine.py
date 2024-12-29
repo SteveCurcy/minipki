@@ -86,6 +86,51 @@ help              Show This message
     self.__ns.close()
     netns.remove(self.hostname)
   
+  def init_certificate(self, address: tuple) -> None:
+    netns.pushns(self.hostname)
+    
+    c_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    result = c_socket.connect_ex(address)
+    if result == 0:
+      print(f"[MiniPKI] {self.hostname}: connected to {address}.")
+    else:
+      print(f"[MiniPKI] Error: failed to connect to {address}.")
+      netns.popns()
+      return None
+
+    tp_cert = pickle.loads(c_socket.recv(1024))
+    c_socket.send(pickle.dumps({
+      'status': 'ok',
+      'request': {
+        'type': 'csr',
+        'csr': utils.serialize_csr(self.get_csr())
+      }
+    }))
+    res = pickle.loads(c_socket.recv(4096))
+    self.certificate = utils.load_cert(res['certificate'])
+    self.chain = utils.load_chain(res['chain'])
+    c_socket.close()
+    netns.popns()
+  
+  def check_cert(self, address: tuple, sn: int) -> bool:
+    netns.pushns(self.hostname)
+    
+    c_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    result = c_socket.connect_ex(address)
+    if result == 0:
+      print(f"[MiniPKI] {self.hostname}: connected to {address}.")
+    else:
+      print(f"[MiniPKI] Error: failed to connect to {address}.")
+      netns.popns()
+      return False
+    
+    c_socket.send(pickle.dumps(sn))
+    res = pickle.loads(c_socket.recv(1024))
+    c_socket.close()
+    
+    netns.popns()
+    return res
+  
   '''
   @param type: what do you wanna flush into the machine, which MUST be one of:
     'cert': only flush a certificate.
@@ -338,6 +383,7 @@ class OCSP(Server):
   def work(self, c_socket: socket, c_address: tuple) -> None:
     sn = int(pickle.loads(c_socket.recv(1024)))
     if sn == -1:
+      c_socket.send(pickle.dumps(False))
       c_socket.close()
       return None
     c_socket.send(pickle.dumps(self.__ldap.get(sn)))
@@ -415,32 +461,6 @@ class TrustPlat(Server):
 class Client(Machine):
   def __init__(self, hostname):
     super().__init__(hostname)
-    
-  def init_certificate(self, address: tuple) -> None:
-    netns.pushns(self.hostname)
-    
-    c_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    result = c_socket.connect_ex(address)
-    if result == 0:
-      print(f"[MiniPKI] {self.hostname}: connected to {address}.")
-    else:
-      print(f"[MiniPKI] Error: failed to connect to {address}.")
-      netns.popns()
-      return None
-
-    tp_cert = pickle.loads(c_socket.recv(1024))
-    c_socket.send(pickle.dumps({
-      'status': 'ok',
-      'request': {
-        'type': 'csr',
-        'csr': utils.serialize_csr(self.get_csr())
-      }
-    }))
-    res = pickle.loads(c_socket.recv(4096))
-    self.certificate = utils.load_cert(res['certificate'])
-    self.chain = utils.load_chain(res['chain'])
-    c_socket.close()
-    netns.popns()
   
   def connect(self, addr: str, port: int) -> bool:
     netns.pushns(self.hostname)
@@ -484,6 +504,9 @@ if __name__ == '__main__':
   import time
   time.sleep(1)
   client.init_certificate(('192.168.0.254', 233))
+  server.init_certificate(('192.168.0.254', 233))
+  time.sleep(1)
+  print(client.check_cert(('192.168.0.253', 233), client.certificate.serial_number))
   client.connect(server.address, server.service_port)
   server.quick_down()
   client.quick_down()

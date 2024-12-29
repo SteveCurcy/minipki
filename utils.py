@@ -11,6 +11,7 @@ def public_key_str(public_key: ec.EllipticCurvePublicKey) -> str:
 
 def certificate_str(certificate: x509.Certificate) -> str:
   return f'''
+Serail Number: {certificate.serial_number}
 Subject: {str(certificate.subject)[6:-2]}
 Issuer: {str(certificate.issuer)[6:-2]}
 Invalid Before: {certificate.not_valid_before_utc}
@@ -40,14 +41,16 @@ def serialize_csr(csr: x509.CertificateSigningRequest) -> bytes:
   )
 
 def serialize_chain(chain: dict) -> dict:
+  res_chain = {}
   for key in chain:
-    chain[key] = serialize_cert(chain[key])
-  return chain
+    res_chain.update({key: serialize_cert(chain[key])})
+  return res_chain
 
 def load_chain(chain: dict) -> dict:
+  res_chain = {}
   for key in chain:
-    chain[key] = load_cert(chain[key])
-  return chain
+    res_chain.update({key: load_cert(chain[key])})
+  return res_chain
 
 def load_csr(csr: bytes) -> x509.CertificateSigningRequest:
   return x509.load_der_x509_csr(csr)
